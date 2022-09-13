@@ -187,8 +187,12 @@ class DynamicsMixin:
         T,
         q0,
         torque=None,
+        ExtForce=None,
         torque_args={},
+        pargs={},
         qd0=None,
+        qd_max=None,
+        tau_max=None,
         solver="RK45",
         solver_args={},
         dt=None,
@@ -302,6 +306,14 @@ class DynamicsMixin:
             qd0 = np.zeros((n,))
         else:
             qd0 = getvector(qd0, n)
+        if qd_max is None:
+            qd_max = np.zeros((n,))
+        else:
+            qd_max = getvector(qd_max, n)
+        if tau_max is None:
+            tau_max = np.zeros((n,))
+        else:
+            tau_max = getvector(tau_max, n)    
         if torque is not None:
             if not callable(torque):
                 raise ValueError("torque function must be callable")
@@ -313,7 +325,7 @@ class DynamicsMixin:
         scipy_integrator = integrate.__dict__[solver]
 
         integrator = scipy_integrator(
-            lambda t, y: self._fdyn(t, y, torque, torque_args),
+            lambda t, y: self._fdyn(t, y, torque, ExtForce, torque_args, pargs, qd_max, tau_max),
             t0=0.0,
             y0=x0,
             t_bound=T,
@@ -362,7 +374,7 @@ class DynamicsMixin:
         else:
             return namedtuple("fdyn", "t q qd")(tarray, xarray[:, :n], xarray[:, n:])
 
-    def _fdyn(self, t, x, torqfun, targs):
+    def _fdyn(self, t, x, torqfun, ExtForce, targs, pargs, qd_max, tau_max):
         """
         Private function called by fdyn
 
@@ -397,11 +409,16 @@ class DynamicsMixin:
                     "torque function must return vector with N real elements"
                 )
 
-        qdd = self.accel(q, qd, tau)
+        if ExtForce is None:
+            F_ext = np.zeros((n,))
+        else:
+            F_ext = ExtForce(self, t, q, **pargs)        
+
+        qdd = self.accel(q, qd, tau, F_ext, qd_max, tau_max)
 
         return np.r_[qd, qdd]
 
-    def accel(self, q, qd, torque, gravity=None):
+    def accel(self, q, qd, torque, force, qd_max, tau_max, gravity=None):
         r"""
         Compute acceleration due to applied torque
 
@@ -460,10 +477,11 @@ class DynamicsMixin:
         q = getmatrix(q, (None, self.n))
         qd = getmatrix(qd, (None, self.n))
         torque = getmatrix(torque, (None, self.n))
+        force = getmatrix(force, (None, self.n))
 
         qdd = np.zeros((q.shape[0], self.n))
 
-        for k, (qk, qdk, tauk) in enumerate(zip(q, qd, torque)):
+        for k, (qk, qdk, tauk, forcek) in enumerate(zip(q, qd, torque, force)):
             # Compute current manipulator inertia torques resulting from unit
             # acceleration of each joint with no gravity.
             qI = (np.c_[qk] @ np.ones((1, self.n))).T
@@ -471,13 +489,49 @@ class DynamicsMixin:
             qddI = np.eye(self.n)
 
             M = self.rne(qI, qdI, qddI, gravity=[0, 0, 0])
-
+            Ja = self.jacob0(qk)
             # Compute gravity and coriolis torque torques resulting from zero
             # acceleration at given velocity & with gravity acting.
             tau = self.rne(qk, qdk, np.zeros((1, self.n)), gravity=gravity)
 
+            # Joint velocities constraints
+            if np.all(qd_max):
+                if (qdk[0] > qd_max[0]):
+                    if (np.sign(qdk[0]) == np.sign(tauk[0])):
+                        tauk[0] = 0
+                if (qdk[1] > qd_max[1]):
+                    if (np.sign(qdk[1]) == np.sign(tauk[1])):
+                        tauk[1] = 0
+                if (qdk[2] > qd_max[2]):
+                    if (np.sign(qdk[2]) == np.sign(tauk[2])):
+                        tauk[2] = 0
+                if (qdk[3] > qd_max[3]):
+                    if (np.sign(qdk[3]) == np.sign(tauk[3])):
+                        tauk[3] = 0
+                if (qdk[4] > qd_max[4]):
+                    if (np.sign(qdk[4]) == np.sign(tauk[4])):
+                        tauk[4] = 0
+                if (qdk[5] > qd_max[5]):
+                    if (np.sign(qdk[5]) == np.sign(tauk[5])):
+                        tauk[5] = 0
+
+            # Control torque constraints
+            if np.all(tau_max):
+                if (tauk[0] >= tau_max[0]):
+                    tauk[0] = tau_max[0]
+                if (tauk[1] >= tau_max[1]):
+                    tauk[1] = tau_max[1]
+                if (tauk[2] >= tau_max[2]):
+                    tauk[2] = tau_max[2]
+                if (tauk[3] >= tau_max[3]):
+                    tauk[3] = tau_max[3]
+                if (tauk[4] >= tau_max[4]):
+                    tauk[4] = tau_max[4]
+                if (tauk[5] >= tau_max[5]):
+                    tauk[5] = tau_max[5]
+
             # solve is faster than inv() which is faster than pinv()
-            qdd[k, :] = np.linalg.solve(M, tauk - tau)
+            qdd[k, :] = np.linalg.solve(M, tauk - tau - Ja.T@forcek)
 
         if q.shape[0] == 1:
             return qdd[0, :]
