@@ -65,7 +65,7 @@ class Jaco2(DHRobot):
                 d=D1,  # link length (Dennavit-Hartenberg notation)
                 a=0,  # link offset (Dennavit-Hartenberg notation)
                 alpha=pi/2,  # link twist (Dennavit-Hartenberg notation)
-                offset=-pi,
+                offset=pi,
                 m=0.46784,  # mass of link
                 # distance of ith origin to center of mass [x,y,z]
                 # in link reference frame
@@ -93,7 +93,7 @@ class Jaco2(DHRobot):
                 d=-e2,
                 a=0,
                 alpha=pi/2,
-                offset=pi/2,
+                offset=-pi/2,
                 m=0.99,
                 r=[0, -0.2065, -0.01],
                 I=[0.0105, 7.9200e-04, 0.0105, 0, 0, 0],
@@ -126,7 +126,7 @@ class Jaco2(DHRobot):
                 d=-(D5+D6),
                 a=0,
                 alpha=pi,
-                offset=-pi/2,
+                offset=pi/2,
                 m=0.463,
                 r=[0, 0.0497208855, -0.0028562765],
                 I=[4.3213e-04, 9.2600e-05, 4.3213e-04, 0, 0, 0],
@@ -140,7 +140,7 @@ class Jaco2(DHRobot):
             manufacturer='Kinova',
             keywords=('symbolic',)
         )
-        self.qr =  np.r_[0, 180, 180, 0, 180, 0]* deg # vertical pose as per Fig 2
+        self.qr =  np.r_[180, 180, 180, 0, 0, 180]* deg # reset position
         self.qz = np.r_[0, 0, 0, 0, 0, 0] # zero angles
         self.qn = np.r_[0, 180, 90, 0, 135, 0]*deg  # Position that make the worst-configuration for the inertial matrix
         self.qh =  np.r_[0, 2.9, 1.3, -2.07, 1.4, 0]  # Home position by default
