@@ -2039,8 +2039,111 @@ class ERobot(BaseERobot):
                         bin = concatenate((bin, l_bin))
 
         return Ain, bin
+    r"""     
+        # inverse dynamics (recursive Newton-Euler) using spatial vector notation
+    def rne(robot, q, qd, qdd, symbolic=False, gravity=None):
 
+        n = robot.n
+
+        # allocate intermediate variables
+        Xup = SE3.Alloc(n)
+        Xtree = SE3.Alloc(n)
+
+        v = SpatialVelocity.Alloc(n)
+        a = SpatialAcceleration.Alloc(n)
+        f = SpatialForce.Alloc(n)
+        I = SpatialInertia.Alloc(n)  # noqa
+        s = []  # joint motion subspace
+        if symbolic:
+            Q = empty((n,), dtype="O")  # joint torque/force
+        else:
+            Q = empty((n,))  # joint torque/force
+
+        # A temp variable to handle static joints
+        Ts = SE3(eye(4, dtype="O"), check=False)
+
+        # A counter through joints
+        j = 0
+
+        # initialize intermediate variables
+        for link in robot.links:
+            if link.isjoint:
+                I[j] = SpatialInertia(m=link.m, r=link.r)
+                if symbolic and link.Ts is None:
+                    Xtree[j] = SE3(eye(4, dtype="O"), check=False)
+                else:
+                    Xtree[j] = Ts * SE3(link.Ts, check=False)
+
+                if link.v is not None:
+                    s.append(link.v.s)
+
+                # Increment the joint counter
+                j += 1
+
+                # Reset the Ts tracker
+                Ts = SE3(eye(4, dtype="O"), check=False)
+            else:
+                Ts *= SE3(link.Ts, check=False)
+
+        if gravity is None:
+            a_grav = -SpatialAcceleration(robot.gravity)
+        else:
+            a_grav = -SpatialAcceleration(gravity)
+
+        # forward recursion
+
+        # A counter through joints
+        j = 0
+
+        for link in robot.links:
+            if link.isjoint:
+                vJ = SpatialVelocity(s[j] * qd[j])
+
+                # transform from parent(j) to j
+                Xup[j] = link.A(q[j]).inv()
+
+                jointParent = link.parent
+                while not (jointParent is None or jointParent.isjoint):
+                    jointParent = jointParent.parent
+
+                if jointParent is None:
+                    v[j] = vJ
+                    a[j] = Xup[j] * a_grav + SpatialAcceleration(s[j] * qdd[j])
+                else:
+                    jp = jointParent.jindex
+                    v[j] = Xup[j] * v[jp] + vJ
+                    a[j] = Xup[j] * a[jp] + SpatialAcceleration(s[j] * qdd[j]) + v[j] @ vJ
+
+                f[j] = I[j] * a[j] + v[j] @ (I[j] * v[j])
+
+                # Increment the joint counter
+                j += 1
+
+        # backward recursion
+
+        # A counter through joints
+        j = n-1
+
+        for link in reversed(robot.links):
+            if link.isjoint:
+                # next line could be np.dot(), but fails for symbolic arguments
+                Q[j] = sum(f[j].A * s[j])
+
+                jointParent = link.parent
+                while not (jointParent is None or jointParent.isjoint):
+                    jointParent = jointParent.parent
+
+                if jointParent is not None:
+                    jp = link.jindex
+                    f[jp] = f[jp] + Xup[j] * f[j]
+
+                # Decrement the joint counter
+                j -= 1
+
+        return Q
+    """    
     # inverse dynamics (recursive Newton-Euler) using spatial vector notation
+    
     def rne(self, q, qd, qdd, symbolic=False, gravity=None):
 
         n = self.n
@@ -2125,7 +2228,7 @@ class ERobot(BaseERobot):
         return Q
 
     # --------------------------------------------------------------------- #
-
+    
     def ik_lm_chan(
         self,
         Tep: Union[ndarray, SE3],
